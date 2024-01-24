@@ -4,11 +4,11 @@
 
 This repository contains the report and code which I complted for my third year project at the University of Warwick as a MSci Data Science Student.
 
-The code is in the form of an RMarkdown file and a Netica file (Bayesian Network).
+The code is in the form RMarkdown files (.Rmd and knitted .pdfs) and Netica files (Bayesian Network).
 
 The code and report are free to download and view. 
 
-## File Explainations and how to run them: 
+## File Explainations and how to run the code: 
 
 This submission folder contains the following documents: 
 

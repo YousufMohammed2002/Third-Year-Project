@@ -1,0 +1,764 @@
+---
+title: "CAMH Data set Analysis"
+author: '2003549'
+date: '2022-11-15'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+#load required packages
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(tableone)
+library(car)
+library(likert)
+library(MASS)
+knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=60),tidy=TRUE)
+#load the data set
+camh <- read.csv("survey1_encoded.csv")
+```
+
+# About the data
+
+The data was collected by two groups, The Centre for Addiction an Mental Health (CAMH) and Delvinia. They released two surveys (I will be analysing the first one), the first survey was conducted on May 8th - 12th 2020 receiving responses from just over 1000 Canadians. These surveys were conducted to see whether Canadians' mental health and substance usage changed from the COVID-19 pandemic. The dataset can be found on this  [website](https://www.kaggle.com/datasets/valbauman/camhdelvinia-survey-1?select=survey1_results.csv), and the survey questions can be found as the first row of the .csv file. 
+
+A lot of the columns of the data frame are duplicates, they have the responses to the question as the respondents answers (e.g. 'not at all', 'somewhat', 'usually' or 'all the time') and given the numeric value as well (e.g 1,2,3 or 4). 
+
+I removed the worded rows to only give the numeric values and also removed some rows of the dataset which are not relevant to my analysis. This includes rows relating to alcohol and substance usage. 
+
+# Data Cleaning
+
+```{r dataCleaning1}
+#data cleaning
+#make subset of dataset with only the required variables
+camh <- camh[,-c(2:5,8,10,18,19,22,24,25,27,29,31,33,35,37,39,41:49,50,52,54,58:64,65,66,68,70,72,74)]
+#change variable names
+names(camh) <- c("ID", "Province","ProvinceCode", "AgeRange", "Sex", "Question4.1", "Question4.2", "Question4.3", "Question4.4", "Question4.5", "Question4.6",  "Question5", "ChangeInEmployment", "ChangeInWorkingHours", "Question7", "Question8.1", "Question8.2", "Question8.3", "Question8.4", "Question8.5", "Question8.6", "Question8.7" , "Question20.1", "Question20.2", "Question20.3", "Question23", "LivingStatus", "MaritalStatus", "Ethnicity", "HouseholdIncome", "LivingArea")
+```
+
+
+```{r dataCleaning2}
+#set variables as factors
+camh$AgeRange <- as.factor(camh$AgeRange)
+camh$Sex <- as.factor(camh$Sex)
+camh$LivingStatus <- as.factor(camh$LivingStatus)
+camh$MaritalStatus <- as.factor(camh$MaritalStatus)
+camh$HouseholdIncome <- factor(camh$HouseholdIncome, levels = c("Less than 40k", "40-79k", "80-119k", "120k+", "Prefer not to answer"))
+camh$Ethnicity <- as.factor(camh$Ethnicity)
+camh$LivingArea <- as.factor(camh$LivingArea)
+camh$ChangeInEmployment <- as.factor(camh$ChangeInEmployment)
+camh$ChangeInWorkingHours <- as.factor(camh$ChangeInWorkingHours)
+camh$Question23 <- as.factor(camh$Question23)
+```
+
+
+
+```{r}
+#inspect the data set
+str(camh)
+
+```
+
+Questions 4 relate to exposure to COVID-19 and include whether the participant is of high risk of catching COVID-19 or if relatives are of high risk/have tested positive for COVID-19. These are boolean variables given as 1 (yes) or 0 (no)
+
+Question 5 relates to how worried individuals are about how the pandemic will affect their financial situation from Not worried at all (1) to very worried (4)
+
+Questions 6 relates to individuals employment and whether they have been affected by the pandemic. 
+
+Question 7 relates to how worried an individual is that someone close to them will get ill with COVID-19
+
+Questions 8 relate to symptoms of anxiety and stress where participants responded on a scale of 1 (Not at all) to 4 (Nearly everyday).
+
+Questions 20 asks the participants whether in the past week they have felt lonely, depressed or hopeful about the future. This is scored from 1 (some of the time (less than 1 day)) up to 4 (Most or all of the time (5-7 days))
+
+Question 23 asks how many people, including yourself live in your household. 
+
+With the Ethnicity column, there are many different options with long names. I merged some of the factors and renamed them to make it cleaner. I will group them to four levels: White, Black, Asian and minority Ethnics (BAME), Other and Prefer Not to Answer. 
+
+
+```{r Relevel factors}
+#changing the names and combining the different ethnicities.
+levels(camh$Ethnicity) <- list("White"="White (European, North American)",
+          "Asian" = c("Asian ? East (e.g., Chinese, Japanese, Korean)","Asian ? South (e.g., Indian, Pakistani, Sri Lankan)","Asian ? South East (e.g., Malaysian, Filipino, Vietnamese)", "Middle Eastern (e.g., Egyptian, Iranian, Lebanese)"),
+          "Black" = "Black (Africa, Caribbean, North American)",
+          "Other" = c("Latin American (e.g., Argentinean, Chilean, Salvadoran)", "Mixed heritage (e.g. Black ? North American & White ? North American)", "Indigenous (First Nations, Inuit, M‚tis)", "Other"),
+          "Prefer not to answer" = "Prefer not to answer"
+          )
+#merge factor levels together
+levels(camh$Question23) <- list(
+                            "1"="1",
+                            "2"="2",
+                            "3"="3",
+                            "4+" = c("4", "5", "6", "7"),
+                            "Prefer not to answer" = "Prefer not to answer"
+                          )
+#merge factor levels together
+levels(camh$MaritalStatus) <- list("Married/Living with Partner" = c("Living with a partner", "Married"),
+                                   "Divorced/Seperated" = c("Divorced", "Separated"),
+                                   "Never Married/Widowed" = c("Widowed", "Never married"),
+                                   "Prefer not to answer" = "Prefer  not to answer"
+                                    )
+
+```
+
+I will also rename and reduce the levels for Question 6.1: How have physical distancing measures due to the COVID-19 pandemic affected your employment situation? 
+
+
+```{r Q6.1Relevel}
+#changing the names and combining the different answers 
+levels(camh$ChangeInEmployment) <- list("Laid off/Let go"="I am not currently working, or I have been laid off/let go, due to the pandemic",
+          "Working from home instead" = "I have continued working, but now I am working from home instead of my usual location",
+          "Previously not working, now back in work"="I was previously not working/ laid off/let go due to the pandemic, but now I am back at work with the same or a new employer",
+          "Previously working from home, now outside" = "I was working from home due to the pandemic, but now I am back working at my usual location outside the home",
+          "No change to work" = c("No change - I have continued working outside my home, as I always did", "No change - I have continued working from home, as I always did"),
+          "Unemployed (No change)" = "No change - I was not employed prior to the pandemic (e.g., retired, student, paid leave, recently graduated) and I have remained unemployed",
+          "Other" = "Other"
+          )
+#combining the different answers 
+levels(camh$ChangeInEmployment) <- list("Laid off/Let go" = "Laid off/Let go",
+                                   "Working from home instead" = "Working from home instead",
+                                   "Unemployed (No change)" = "Unemployed (No change)",
+                                   "No change/Other" = c("No change to work", "Previously not working, now back in work", "Previously working from home, now outside", "Other")
+                                    )
+```
+
+I will rename the answers to question 6.1 as one answer has no name and is blank
+
+```{r Q6.2Relevel}
+#changing the names and combining the different answers
+levels(camh$ChangeInWorkingHours) <- c("NA", "Decreased a lot", "Decreased somewhat", "Increased a lot", "Increased somewhat", "No change")
+```
+
+To start with I will sum up the boolean scores of question 4. This new row, will be a higher number for individuals who have a high risk of being affected by COVID-10 or have had close friends exposed to COVID-19. 
+
+I will also sum up question Question 8 and question 20, as these can measure how anxious, depression and stressed each individual has been, which will be our response variable. 
+
+Before I sum up the scores, question 20.3 asks: In the PAST 7 DAYS, how often have you felt hopeful about the future?. Where 1 is 'Rarely or none of the time (less than 1 day)' and 4 is 'Most or all of the time (5-7 days)' just like the other variables. So I must invert the values of this row before summing, meaning 1 will become 4, 2 will become 3 and vice versa. As a higher score is meant to be more negative
+
+```{r clean20.3}
+#inverting question 20.3 
+camh$newQuestion20.3<-camh$Question20.3
+camh <- within(camh, newQuestion20.3[Question20.3 == 1] <- 4)
+camh <- within(camh, newQuestion20.3[Question20.3 == 2] <- 3)
+camh <- within(camh, newQuestion20.3[Question20.3 == 3] <- 2)
+camh <- within(camh, newQuestion20.3[Question20.3 == 4] <- 1)
+```
+
+```{r sumScores}
+#summing the columns of question 4 and 8 + 20
+#sum of question 4
+camh <-mutate(camh, Q4Sum=rowSums(dplyr::select(camh, Question4.1, Question4.2, Question4.3, Question4.4, Question4.5, Question4.6)))
+
+#factor variable of the sum of Q4. Since very few values from 3 onwards we will group these together
+camh$Q4factor<-factor(camh$Q4Sum)
+levels(camh$Q4factor) <- list("0"="0",
+          "1"="1",
+          "2"="2",
+          "3+" = c("3","4","5","6")
+          )
+
+
+#sum of question 8
+camh <-mutate(camh, Q8Sum=rowSums(dplyr::select(camh, Question8.1, Question8.2, Question8.3, Question8.4, Question8.5, Question8.6, Question8.7)))
+
+#sum of question 20
+camh <-mutate(camh, Q20Sum=rowSums(dplyr::select(camh, Question20.1, Question20.2, newQuestion20.3)))
+
+#question 8 + 20 
+camh <-mutate(camh, TotalSum=rowSums(dplyr::select(camh, Q8Sum, Q20Sum)))
+
+summary(camh$TotalSum)
+print(table(camh$Q4Sum))
+```
+## Exploratory Data Analysis
+
+```{r}
+#create box plot of variables 
+kable(table(camh$Q4Sum))
+ggplot(data=camh, aes(x=factor(Q4Sum), y=TotalSum)) +
+   geom_boxplot() + labs(x = "Sum of question 4 scores", y = "sum of Question 8 and Question 20 scores")
+```
+
+The boxplot shows a positive trend of Question 8 and 20 scores against Question 4 scores. However, the number of individuals with high scores for question 4 are extremely small. Only 2% of the data points have scores of 4 or above. Meaning this is not a reliable score.
+
+```{r}
+#create box plot of variables 
+kable(summary(camh$Sex), caption = "Distribution of Sex")%>% kable_classic(latex_options = "HOLD_position")
+ggplot(camh, aes(x=Sex, y=TotalSum)) + 
+    geom_boxplot()
+```
+We can see that women had an overall high score compared to men, and the distribution of men and women on the survey are fairly even. There are only 3 individuals who chose other, meaning there are not enough data points to accurately compare people with other sex compared to male and female. 
+
+```{r}
+#create box plot of variables 
+kable(summary(camh$AgeRange), caption = "Distribution of Age Range")%>% kable_classic(latex_options = "HOLD_position")
+ggplot(camh, aes(x=AgeRange, y=TotalSum)) + 
+    geom_boxplot()
+```
+
+There is a decline in individuals' score as the age groups increases. This suggests evidence of younger individuals experiencing worse mental health compared to older individuals. 
+
+```{r}
+#create box plot of variables 
+kable(summary(camh$Ethnicity), caption = "Distribution of Ethnicity")%>% kable_classic(latex_options = "HOLD_position")
+ggplot(camh, aes(x=Ethnicity, y=TotalSum)) + 
+    geom_boxplot()
+```
+Majority of the individuals are white (69%) with the next common ethnicity group being East Asian (13%).
+
+The box plot shows that South Asians had a higher score than all other groups followed by other Asian ethnicity groups. Black and white individuals had lower scores in comparison to the other ethnic groups.
+
+```{r}
+#create box plot of variables 
+kable(summary(camh$LivingStatus), caption = "Distribution of Living Status")%>% kable_classic(latex_options = "HOLD_position")
+ggplot(camh, aes(x=LivingStatus, y=TotalSum)) + 
+    geom_boxplot()
+```
+Individuals who live with others gave slightly higher scores compared to individuals who live alone, although they are very close to each other. 
+
+```{r}
+#create box plot of variables 
+kable(as.array(summary(camh$Question23)), caption = "Distribution of number of people in household")%>% kable_classic(latex_options = "HOLD_position")
+ggplot(camh, aes(x=Question23, y=TotalSum)) + 
+    geom_boxplot()
+```
+
+
+```{r}
+#create box plot of variables 
+kable(summary(camh$LivingArea), caption = "Distribution of Living Area")%>% kable_classic(latex_options = "HOLD_position")
+ggplot(camh, aes(x=LivingArea, y=TotalSum)) + 
+    geom_boxplot()
+```
+Individuals in rural areas had lower scores compared to individuals living in suburban and urban areas, with both of those being having almost identical scores.
+
+```{r}
+#create box plot of variables 
+kable(summary(camh$HouseholdIncome), caption = "Distribution of Household Income")%>% kable_styling(latex_options = "HOLD_position")
+ggplot(camh, aes(x=HouseholdIncome, y=TotalSum)) + 
+    geom_boxplot()
+```
+
+Between earning 40k - 120k+, we can see a slight decrease of scores as the income increases, however individuals individuals less than 40k have scores similar to earning 80k-120k+. Individuals who prefered not to answer had the lowest scores overall.
+```{r}
+#create box plot of variables 
+kable(summary(camh$MaritalStatus), caption = "Distribution of Marital Status")%>% kable_styling(latex_options = "HOLD_position")
+ggplot(camh, aes(x=MaritalStatus, y=TotalSum)) + 
+    geom_boxplot()
+```
+
+Individuals who were never married or separated had higher scores. Where as widowed, married and divorced had lower scores. One reason for widowed scores being so low is that widowed individuals are more likely to be older and as we saw previously older individuals had lower scores. Similarly to income, individuals who preferred not to answer also had lower scores. 
+```{r}
+#create box plot of variables 
+kable(summary(camh$ChangeInWorkingHours), caption = "Distribution of Question 6.2")%>% kable_classic(latex_options = "HOLD_position")
+ggplot(camh, aes(x=ChangeInWorkingHours, y=TotalSum)) + 
+    geom_boxplot() + labs(x="how has the number of hours you are working for pay been affected by the COVID-19 pandemic? ")
+```
+First thing to notice is that 455 of the responses are blank, most likely na. Individuals who decreased or increased working hours had higher scores, with individuals who decreased hours a lot having the highest scores. Individuals who had no change in working hours had the lowest scores.
+
+```{r}
+#create box plot of variables 
+kable(summary(camh$ChangeInEmployment), caption = "Distribution of Question 6.1")%>% kable_classic(latex_options = "HOLD_position")
+ggplot(camh, aes(x=ChangeInEmployment, y=TotalSum)) + 
+    geom_boxplot() + labs(x="How have physical distancing measures due to the COVID-19 pandemic \naffected your employment situation?")
+```
+
+# Visualisation
+
+## Summary Table:
+
+```{r tableOne1, include = FALSE}
+#create summary table
+table1<-CreateTableOne(vars = c("AgeRange",  "Sex",  "LivingStatus",  "MaritalStatus",  "HouseholdIncome",  "LivingArea",  "Ethnicity" , "ChangeInEmployment", "ChangeInWorkingHours","Q4Sum",  "Q8Sum", "Q20Sum"), data=camh)
+
+table1 <- print(table1)
+```
+```{r tableOne2}
+#print summary table nicely
+table1 %>% kbl() %>% kable_classic(latex_options = c("HOLD_position"), full_width = F) %>% add_indent(c(3:5, 7:9, 11:13, 15:18, 20:24, 26:28, 30:34, 36:39, 41:46), level_of_indent = 1) #%>% save_kable(file = "CAMHSummaryTable.png", zoom = 1.5)
+```
+
+
+## Plots
+
+```{r likertHeatMap}
+#select only the Likert scale questions
+newCamh = camh[16:25]
+newCamh[1:10] <- lapply(newCamh[1:10], factor)
+#rename the levels of the questions
+levels(newCamh$Question8.1) <- list("1 (Not at all/less \nthan 1 day)"="1",
+          "2 (Several days/\n1-2 days)"="2",
+          "3 (Over half the \ndays/3-4 days)"="3",
+          "4 (Nearly every \nday/5-7 days)"="4")
+#set as a likert using likert package
+camh_likert = likert(newCamh)
+#plot the heat map
+plot(camh_likert, type = "heat", group.order = names(camh[16:25])) + ggtitle("Heat map showing the individual's responses about their mental \nwellbeing ")
+```
+
+
+```{r  Question20 summary, fig.width=9}
+#select only the Likert scale questions
+newCamh = camh[16:25]
+#set these variables as factors
+newCamh[1:10] <- lapply(newCamh[1:10], factor)
+#rename the levels to include the days of the week to make it clearer
+levels(newCamh$Question8.1) <- list("1 (Not at all)"="1",
+          "2 (Several days)"="2",
+          "3 (Over half the days)"="3",
+          "4 (Nearly every day)"="4")
+newCamh <- newCamh %>% # rename the questions to show what symptom they ae asking about
+  rename(
+    "Nervousness/anxiousness (8.1)" = "Question8.1",
+    "Unable to control worrying (8.2)" = "Question8.2",
+    "Worrying about things  (8.3)" = "Question8.3",
+    "Trouble relaxing (8.4)" = "Question8.4",
+    "Found it hard to sit still (8.5)" = "Question8.5",
+    "Feeling easily annoyed/irritable (8.6)" = "Question8.6",
+    "Feeling afraid (8.7)" = "Question8.7",
+    "Feeling Depressed (20.1)" = "Question20.1",
+    "Feeling Lonely (20.2)" = "Question20.2",
+    "Feeling Hopeful about the future (20.3)" = "Question20.3"
+  )
+#set as a likert using likert package
+camh_likert = likert(newCamh)
+plot(camh_likert, centered=FALSE, group.order = names(newCamh[1:10])) + ggtitle("How often has the following occurred to you... ") + xlab("Question (Number)") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+
+
+
+```{r Question 4 and 8, fig.height=8, fig.width=8}
+#select only the Likert scale questions
+newCamh = camh[16:24]
+#set these variables as factors
+newCamh[1:9] <- lapply(newCamh[1:9], factor)
+
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh, grouping=factor(camh$Q4factor))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Number of 'yes' responses on Question 4")
+```
+
+
+```{r Age and Q8, fig.height=7.2}
+#select only the Likert scale questions
+newCamh = camh[16:24]
+#set these variables as factors
+newCamh[1:9] <- lapply(newCamh[1:9], factor)
+
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh, grouping=factor(camh$AgeRange))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Age Range of Individuals")
+```
+
+```{r EmploymentStatus and Q8, fig.height=8}
+#select only the Likert scale questions
+newCamh = camh[16:24]
+#set these variables as factors
+newCamh[1:9] <- lapply(newCamh[1:9], factor)
+
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh, grouping=factor(camh$ChangeInEmployment))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Change in Employment of Individuals")
+```
+
+
+Below the three individuals who responded with Other for their sex have been removed as their sample size is too small. 
+
+```{r  Sex and Q8, fig.height=6.5}
+#select only the Likert scale questions
+newCamh = camh[c(5,16:24)]
+#set these variables as factors
+newCamh[1:10] <- lapply(newCamh[1:10], factor)
+newCamh = newCamh[!newCamh$Sex == "Other",]
+newCamh <- droplevels(newCamh)
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh[-c(1)], grouping=newCamh$Sex)
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Sex of Individuals")
+```
+
+
+```{r Ethnicity and Q8, fig.height=10}
+#select only the Likert scale questions
+newCamh = camh[c(16:24, 29)]
+#set these variables as factors
+newCamh[1:10] <- lapply(newCamh[1:10], factor)
+newCamh = newCamh[!newCamh$Ethnicity == "Prefer not to answer",]
+newCamh <- droplevels(newCamh)
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh[-c(10)], grouping=factor(newCamh$Ethnicity))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Ethnicity of Individuals")
+```
+
+
+Below I have removed three individual's whose response as prefer not to answer
+
+```{r Q23 and Q8, fig.height=8}
+#select only the Likert scale questions
+newCamh = camh[c(16:24,26)]
+#set these variables as factors
+newCamh[1:10] <- lapply(newCamh[1:10], factor)
+newCamh = newCamh[!newCamh$Question23 == "Prefer not to answer",]
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh[-c(10)], grouping=factor(newCamh$Question23))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Number of people in individual's household, including themselves")
+```
+
+
+```{r Living Area and Q8, fig.height=7}
+#select only the Likert scale questions
+newCamh = camh[16:24]
+#set these variables as factors
+newCamh[1:9] <- lapply(newCamh[1:9], factor)
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh, grouping=factor(camh$LivingArea))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert,cex.lab=4) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Living Area of Individuals")
+```
+
+
+```{r Income and Q8, fig.height=9}
+#select only the Likert scale questions
+newCamh = camh[16:24]
+#set these variables as factors
+newCamh[1:9] <- lapply(newCamh[1:9], factor)
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh, grouping=factor(camh$HouseholdIncome))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Household Income of Individuals")
+```
+
+
+```{r Marital Status and Q8, fig.height=8.5}
+#select only the Likert scale questions
+newCamh = camh[16:24]
+#set these variables as factors
+newCamh[1:9] <- lapply(newCamh[1:9], factor)
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh, grouping=factor(camh$MaritalStatus))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Marital Status of Individuals")
+```
+
+
+
+
+```{r Working hours and Q8, fig.height=10}
+#set this variablea as a factor variable
+camh$ChangeInWorkingHours <- factor(camh$ChangeInWorkingHours, levels = c("Increased a lot", "Decreased a lot", "Increased somewhat", "Decreased somewhat", "No change", "NA"))
+#select only the Likert scale questions
+newCamh = camh[16:24]
+#set these variables as factors
+newCamh[1:9] <- lapply(newCamh[1:9], factor)
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh, grouping=factor(camh$ChangeInWorkingHours))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Change in Working hours of Individuals")
+```
+
+
+```{r Q7 and Q8, fig.height=8.5}
+#select only the Likert scale questions
+newCamh = camh[16:24]
+#set these variables as factors
+newCamh[1:9] <- lapply(newCamh[1:9], factor)
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh, grouping=factor(camh$Question7))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("How worried are you that you or someone close to you (close relative or friend) will get ill from COVID-19?")
+```
+
+```{r Change in Employment and Q8, fig.height=9}
+#select only the Likert scale questions
+newCamh = camh[c(13,16:24)]
+#remove the unemployed individuals
+newCamh = newCamh[!newCamh$ChangeInEmployment == "Unemployed (No change)",]
+newCamh <- droplevels(newCamh)
+#set these variables as factors
+newCamh[1:9] <- lapply(newCamh[1:9], factor)
+newCamh <- newCamh %>%
+  rename(# rename the questions to show what symptom they ae asking about
+    "Nervousness/anxiousness" = "Question8.1",
+    "Unable to control worrying" = "Question8.2",
+    "Worrying about things" = "Question8.3",
+    "Trouble relaxing" = "Question8.4",
+    "Found it hard to sit still" = "Question8.5",
+    "Feeling easily annoyed/irritable" = "Question8.6",
+    "Feeling afraid" = "Question8.7",
+    "Feeling Depressed" = "Question20.1",
+    "Feeling Lonely" = "Question20.2"
+  )
+#set as a likert using likert package and group by the factor
+camh_likert <- likert(newCamh[-c(1)], grouping=factor(newCamh$ChangeInEmployment))
+camh_likertgs <- likert(summary = camh_likert$results, grouping = camh_likert$results[,1])
+#create the plot and add the titles
+plot(camh_likert) + ggtitle("How often has the following occurred to you?") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Change in Employment of Individuals")
+```
+
+
+
+# Modelling
+
+I will sum up the scores on question 8 and 20 as `Total Sum` to be the dependant variable.
+
+```{r}
+#histogram of total score
+hist(camh$TotalSum,xlab="Sum of scores",main="")
+```
+The histogram above shows that the `TotalSum` is not normally distributed, however due to the large sample size and central limit theorem we can still use parametric testing. 
+
+Question23 (How many people including yourself live in your household) and LivingStatus (Alone or with others) are going to cause multicollinearity, so I will only include question23 in the model. I will use VIF to check for any more multicollinearity in my model. 
+
+As the scale-location plot originally showed an increasing red line, I took a log transformation of the response variable to help improve the assumption of homoscedasticity. 
+```{r}
+#set the reference category as no change in working hours
+camh$ChangeInWorkingHours <- relevel(camh$ChangeInWorkingHours , ref = "No change") 
+#create the linear model
+lm1 <- lm(log(TotalSum)~Sex + Q4Sum + AgeRange + Ethnicity + Question23 + LivingArea + HouseholdIncome + MaritalStatus + ChangeInWorkingHours ,data=camh)
+#plot the diagnostic plots
+plot(lm1)
+```
+```{r}
+#the full model
+lm2 <- lm(log(TotalSum)~(Sex + Q4Sum + AgeRange + Ethnicity + Question23 + LivingArea + HouseholdIncome + MaritalStatus + ChangeInWorkingHours)^2 ,data=camh)
+#perform anova
+anova(lm2)
+```
+
+The anova shows us that there is a interaction between household income and marital status. This makes sense as married households have more people, hence more overall income.
+
+Most variables have VIF close to one, except `Question23` and `MaritalStatus`. This makes sense as married/living with partner individuals are likely to live with more people (their spouse/children). However the VIF is still lower than 5 so I will keep both these parameters in my model.
+
+Testing at a 5% significance level we can see that Sex, Q4factor, AgeRange, Ethnicity, Household income and Question6.2 (Change in working hours) all have significantly different scores depending on these variables. 
+
+
+Let us use a t-test to compare sex. I will remove the individuals who recorded their sex as Other as there are very few. 
+
+```{r t-test sex}
+#performing t-test of sex in model
+newCamh <- camh
+#remove the other values from the sex column
+newCamh = newCamh[!newCamh$Sex == "Other",]
+newCamh <- droplevels(newCamh)
+#perform t-test
+t.test(TotalSum~Sex,data=newCamh)
+```
+
+We have a very small p value, meaning that there is a significant difference in sexes. Specifically, men have lower scores compared to women. As men have an average score of 18.5 whereas women have an average score of 20.6.
+
+```{r}
+#perform backward stepwise model selection
+lm.min <- lm(log(TotalSum) ~ 1, data=camh)
+lm.step <- step(lm1, direction="backward", trace = 0) # Set trace=0 to turn off printed output
+```
+
+```{r}
+#get summary of the linear model
+summary(lm.step)
+#create table of coeffiecients
+table <- data.frame(coef(lm.step), confint(lm.step), summary(lm.step)$coefficients[,4], exp(coef(lm.step)), exp(confint(lm.step)))
+table %>% round(3) %>% kable(col.names = c("coefficient", "2.5%", "97.5%","p-value", "exp(coefficient)", "exp(2.5%)", "exp(97.5%)"))%>%  kable_classic(latex_options = "HOLD_position", full_width = F)  %>% add_header_above(c( " " = 2, "95% Confidence Interval" = 2, " " = 2, "95% Confidence Interval" = 2))# %>% save_kable(file = "CAMHcoefficients.png", zoom = 2)
+```
+
+```{r fig.height=6, fig.width=9}
+#diagnostic plots 
+par(mfrow=c(2,2))
+plot(lm.step,1)
+plot(lm.step,2)
+plot(lm.step,3)
+plot(lm.step,4)
+par(mfrow=c(1,1))
+```
+
+
+
+
+
+```{r}
+# cross table of change in employment and change in working hours 
+table1 <- table(camh$ChangeInEmployment, camh$ChangeInWorkingHours)
+kable(table1)  %>% kable_classic(latex_options = "HOLD_position", full_width = F)%>% add_header_above(c( "Change in Employment" = 1, "Change in Working Hours" = 6)) #%>% save_kable(file = "EmploymentAndWorkingHours.png", zoom = 1)
+```
+
+
+TABLES CREATED FOR FINAL REPORT:
+
+Sensitivity to findings table from Bayes Net:
+
+```{r}
+sensitivity <- round(matrix(c(62.63, 2.623, 1.887 , 1.361 , 1.266, 1.204 , 0.8914 , 0.6042 , 0.3158 , 0.2285 , 0.09338 , 100 , 4.19 , 3.01 , 2.17, 2.02, 1.92, 1.42, 0.965, 0.504, 0.365, 0.149, 2.31838, 0.04527, 0.03479, 0.02283, 0.02119, 0.01568, 0.01754, 0.01811, 0.00997, 0.00611, 0.00708, 100, 1.95, 1.5, 0.985, 0.914, 0.677, 0.756, 0.781, 0.43, 0.264, 0.305, 0.6386338, 0.0026238, 0.0017380, 0.0014021, 0.0019867, 0.0008925, 0.0010116, 0.0011042, 0.0005838, 0.0003579, 0.0004271), nrow = 11, dimnames = list(c("Total Score","Age Range","Change In Employment Status","Count of Interactions with COVID-19","Change in Working Hours", "Sex", "Number of People in Household", "Ethnicity", "Household Income", "Marital Status", "Living Area"), c("Variance Reduction", "Percent", "Mutual Info" , "Percent", "Variance of Beliefs"))),4)
+
+kable(sensitivity, align="r")%>% kable_classic(latex_options = "HOLD_position", full_width = F) %>% add_header_above(c( "Node" = 1, " " = 5)) #%>% save_kable(file = "SensitivityFindings.png", zoom = 1)
+```
+
+Confusion Matrix from Bayesian Network Testing 
+
+```{r}
+sensitivity <- round(matrix(c(64, 61, 42, 26, 21, 44, 43, 24, 24, 20, 32, 44, 37, 36, 35, 23, 34, 53, 53, 38, 28, 44, 63, 51, 62   ), nrow = 5, dimnames = list(c("10-13", "13-16", "16-20", "20-26", "26-40"), c("10-13", "13-16", "16-20", "20-26", "26-40"))),4)
+
+kable(sensitivity, align="r")%>% kable_classic(latex_options = "HOLD_position", full_width = F) %>% add_header_above(c( "Actual" = 1, "Predicted" = 5)) # %>% save_kable(file = "ConfusionMatrix.png", zoom = 1)
+```
+
+
+FOR APPENDIX
+
+```{r}
+camhappendix <- matrix(c("ID", "Province","ProvinceCode", "AgeRange", "Sex", "Question4.1", "Question4.2", "Question4.3", "Question4.4", "Question4.5", "Question4.6",  "Question5", "ChangeInEmployment", "ChangeInWorkingHours", "Question7", "Question8.1", "Question8.2", "Question8.3", "Question8.4", "Question8.5", "Question8.6", "Question8.7" , "Question20.1", "Question20.2", "Question20.3", "Question23", "LivingStatus", "MaritalStatus", "Ethnicity", "HouseholdIncome", "LivingArea", "ID", "Province", "Province/region", "Age group", "Gender identity", "Q4_1 : I, or someone close to me, has tested positive for COVID-19", "Q4_2 : I, or someone close to me, has had symptoms of COVID-19 but has not been tested 
+", "Q4_3 : I, or someone close to me, has been tested for COVID-19 but it was negative", "Q4_4 : I, or someone close to me, is elderly and/or has a health condition that increases the risk of serious illness from COVID-19 ", "Q4_5 : I have a job that exposes me to high risk of getting COVID-19 ", "Q4_6 : Someone close to me has a job that exposes them to high risk of getting COVID-19 ", "Q5 : How worried are you about the impact of COVID-19 on your personal financial situation?", "Q6 : How have physical distancing measures due to the COVID-19 pandemic affected your employment situation? ", "Q6b : On average, how has the number of hours you are working for pay been affected by the COVID-19 pandemic? ", "Q7 : How worried are you that you or someone close to you (close relative or friend) will get ill from COVID-19?", "Q8x1 : P2W frequency - Feeling nervous, anxious or on edge", "Q8x2 : P2W frequency - Not being able to stop or control worrying", "Q8x3 : P2W frequency - Worrying too much about different things", "Q8x4 : P2W frequency - Trouble relaxing", "Q8x5 : P2W frequency - Being so restless that it?s hard to sit still", "Q8x6 : P2W frequency - Becoming easily annoyed or irritable", "Q8x7 : P2W frequency - Feeling afraid as if something awful might happen", "Q20x1 : In the PAST 7 DAYS, how often have you felt depressed?", "Q20x2 : In the PAST 7 DAYS, how often have you felt lonely?", "Q20x3 : In the PAST 7 DAYS, how often have you felt hopeful about the future?", "Q23 : Including yourself, how many people are currently living in your household?", "Live alone or with others?", "Q26 : What is your current marital status?", "Q27 : Which of the following best describes your racial or ethnic group?", "hIncome : Total household income received in the 2019 year before taxes?", "Q29 : Area you consider to be living in
+"), nrow = 31)
+
+kable(camhappendix)%>% kable_classic(latex_options = "HOLD_position", full_width = F, "striped") %>% add_header_above(c( "New Variable Name" = 1, "Raw Variable Name/Question" = 1))%>% row_spec(1:nrow(camhappendix), extra_css = "padding: 10px") #%>% save_kable(file = "rawCamh.png", zoom = 1)
+```
+

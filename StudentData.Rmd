@@ -1,0 +1,392 @@
+---
+title: "Student Mental Health Analysis"
+author: '2003549'
+date: '2022-10-13'
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+bibliography: CS350Report.bib
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(tableone)
+library(car)
+knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=80),tidy=TRUE)
+StudentRawData<-read.csv("Student Mental Health.csv")
+StudentRawData <- as_tibble(StudentRawData)
+```
+
+The data for this analysis was collected to see if the pandemic worsened university students' mental health. This data was completed by 763 UK Undergraduate students using the 21 question Depression, Anxiety Stress Scale (DASS-21), see @TothEszter . This was done in Autumn over four years (2017-2020) by the School of Psychology at the University of Birmingham. There data can be found on this [website](https://reshare.ukdataservice.ac.uk/854720/). The DASS-21 survey can be found [here](https://www.hgmc.com.au/pdf/dass.pdf) 
+
+The questionnaire asks individuals whether a specific symptom was present over the past week, where the individual can responds with a 0 (did not apply to me at all over the last week) up to 3 (Applied to me very much or most of the time over the past week)
+
+
+```{r summary}
+#showing the error in one of the data points
+summary(StudentRawData$Question.19)
+```
+
+One value in question.19 takes value 11 which has been recorded in error. I will change it to 1.
+```{r clean}
+#change this value to one
+StudentRawData[642,20] <- 1
+#set gender as a factor variable
+StudentRawData$gender <- factor(StudentRawData$gender)
+#rename from gender to sex
+StudentRawData <- StudentRawData %>% rename(sex = gender)
+```
+
+```{r}
+#data cleaning 
+levels(StudentRawData$sex) <- list("male"="male",
+          "female"="female",
+          "Other"="Other")
+#create table to show the amount of missing data
+NAs <- as.data.frame(colSums(is.na(StudentRawData)))
+total <- nrow(StudentRawData)
+NAs <- NAs %>%
+  mutate(percNA = round(NAs/total*100,2))
+#print nicely
+kable(NAs, col.names = c("Number of NAs", "% NAs")) %>% kable_classic(full_width = F)
+```
+
+```{r}
+#cross table of sex and year
+x <- table(StudentRawData$sex, StudentRawData$year)
+#values which are na from the sex column over the four years
+NAs <- table(is.na(StudentRawData$sex), StudentRawData$year)[2,]
+table <- rbind(x,NAs)
+kable(table) %>% add_header_above(c("Sex" = 1, "Year" = 4)) %>% kable_classic(full_width = F) #%>% save_kable(file = "Studenttable_sexAndYear.png", zoom = 1.5)
+```
+
+
+
+
+```{r frequencyTables}
+#factor the age variable from numeric to factor with four levels
+StudentRawData$age = cut(StudentRawData$age, breaks = c(0, 19, 20,21, Inf), right=FALSE, labels=c("18 and under", "19", "20", "21 and over"))
+#frequency table of the variable year
+kable(t(xtabs( ~ year, data=StudentRawData)), caption = "Frequency table of number of data points within each year")%>% kable_classic(latex_options = "HOLD_position")
+
+#frequency table of the variable sex
+kable(t(xtabs( ~ sex, data=StudentRawData)), caption = "Frequency table showing how many males and females are in the dataset")%>% kable_classic(latex_options = "HOLD_position")
+
+#frequency table of the variable age
+kable(t(xtabs( ~ age, data=StudentRawData)), caption = "Frequency table showing ages in the dataset")%>% kable_classic(latex_options = "HOLD_position")
+
+```
+
+
+Table 1 is showing how many data points are given for each year. We can see that majority of the data points are from 2020 (66%). 2018 has the fewest points (4%)  
+
+
+
+Table 2 shows us there are almost six times as many females in this data set compared to males and 12% of the values are given as na. One reason for the significant different in male and female might be due to the stigma around men discussing their emotions and mental health. This could lead to less males willing to fill in this survey and led to a larger amount of female values. 
+
+
+
+Table 3 shows us that most of the ages are between 18-21 with some values above and 2 below. One value for age has been given as 0. I will remove this value from the data frame when using age. 
+
+
+
+The each question of the 21 questions is given to measure either depression, anxiety or stress. The questions are divided up as follows:
+
+Depression: Questions 3, 5, 10, 13, 16, 17 and 21
+
+
+Anxiety: Questions 2, 4, 7, 9, 15, 19 and 20
+
+
+Stress: Questions 1, 6, 8, 11, 12, 14 and 18
+
+I have added to the table the sums of these three scores below:
+
+```{r, sumScores}
+#calculating depression score by summing over the required questions
+StudentRawData <-mutate(StudentRawData, DepressionScore=rowSums(dplyr::select(StudentRawData,  Question.3, Question.5, Question.10, Question.13, Question.16, Question.17, Question.21)))
+
+#calculating anxiety score by summing over the required questions
+StudentRawData <-mutate(StudentRawData, AnxietyScore=rowSums(dplyr::select(StudentRawData, Question.2, Question.4, Question.7, Question.9, Question.15, Question.19, Question.20)))
+
+#calculating stress score by summing over the required questions
+StudentRawData <-mutate(StudentRawData, StressScore=rowSums(dplyr::select(StudentRawData, Question.1, Question.6, Question.8, Question.11, Question.12, Question.14, Question.18)))
+#for ease renaming the id column
+names(StudentRawData)[names(StudentRawData) == "ï..pp.number"] <- "id"
+```
+
+Below I have plotted box plots for the three different scores for each year.
+
+```{r boxPlot, fig.align='center'}
+#add the sums of depression, anxiety and stress scores to the data set
+StudentData<-dplyr::select(StudentRawData, id, year, sex, age, DepressionScore, AnxietyScore, StressScore)
+dasdf <- StudentData %>% pivot_longer(cols = c(DepressionScore, AnxietyScore, StressScore), names_to = "Type", values_to = "score")
+#rename columns for ease of use
+dasdf$Type[dasdf$Type == "AnxietyScore"] <- "Anxiety"
+dasdf$Type[dasdf$Type == "DepressionScore"] <- "Depression"
+dasdf$Type[dasdf$Type == "StressScore"] <- "Stress"
+#create box plot of depression, anxiety and stress scores
+ggplot(dasdf, aes(x=factor(year), y=score, fill=Type)) + 
+    geom_boxplot() + 
+      labs(x="Year", y="Scores on questionnaire for each illness")+
+  scale_fill_discrete(name = "Illness")
+```
+
+
+
+What we can see as a general view for all the years is that people respond highest to stress questions, giving the highest average score, and least to anxiety questions having the lowest mean score.   
+
+
+
+2019 has less variation than the other years across all three scores, we would expect 2020 and 2017 to have high variation as there are more values, but 2018 also has a lot of variation despite having a small sample size.
+
+
+
+For full details on the procedure to interpret the DASS-21 see @Lovibond1995
+
+
+
+This questionnaire (DASS-21) is a shortened version of the 42 question DASS. To interpret the results of the DASS-21, first multiply the scores for each section by 2 and use the following table:
+
+
+```{r}
+#create table to show how to interpret the DASS-21
+interpret <- matrix(c("0-9", "10-13", "14-20" , "21-27" , "28+" , "0-7" , "8-9" , "10-14" , "15-19" , "20+" , "0-14" , "15-18" , "19-25" , "26-33" , "34+"), nrow = 5, dimnames = list(c("Normal","Mild","Moderate","Severe","Extremely Severe"), c("Depression Score","Anxiety Score","Stress Score")))
+kable(interpret, align="c")%>% kable_classic(latex_options = "HOLD_position", full_width = F) #%>% save_kable(file = "DASSInterpretation.png", zoom = 1.5)
+```
+
+I will add these interpretation to the table:
+```{r addInterpretation}
+#new column with scores multiplied by two 
+StudentData$DepressionType<-StudentData$DepressionScore*2
+StudentData$AnxietyType<-StudentData$AnxietyScore*2
+StudentData$StressType<-StudentData$StressScore*2
+
+#depression classifying based on the table above
+StudentData$DepressionType = cut(StudentData$DepressionType, breaks=c(0, 10, 14, 21, 28, 43), right=FALSE,
+labels=c("normal", "mild", "moderate", "severe","extremely severe"))
+StudentData$DepressionType <- as.factor(StudentData$DepressionType)
+
+#anxiety classifying based on the table above
+StudentData$AnxietyType = cut(StudentData$AnxietyType, breaks=c(0, 8, 10, 15, 20, 43), right=FALSE,
+labels=c("normal", "mild", "moderate", "severe","extremely severe"))
+StudentData$AnxietyType <- as.factor(StudentData$AnxietyType)
+
+#stress classifying based on the table above
+StudentData$StressType = cut(StudentData$StressType, breaks=c(0, 15, 19, 26, 34, 43), right=FALSE,
+labels=c("normal", "mild", "moderate", "severe","extremely severe"))
+StudentData$StressType <- as.factor(StudentData$StressType)
+
+```
+
+Here is what the data frame looks like now: 
+
+```{r head}
+#show the head of the dataframe to see what it looks like now
+kable(head(StudentData), caption="Head of the data frame")%>% kable_classic(latex_options = "HOLD_position")
+```
+```{r tableOne1, include=FALSE}
+#creating summary table of the full data set
+tableStudentData <- StudentData
+tableStudentData <- tableStudentData %>% 
+  rename( # rename the rows to make the table clearer
+    "DepressionType - n"  = DepressionType,
+    "AnxietyType - n"  = AnxietyType,
+    "StressType - n"  = StressType,
+    )
+#create the table stratifying by year
+table<-CreateTableOne(vars = c("sex","age", "DepressionScore","DepressionType - n", "AnxietyScore", "AnxietyType - n", "StressScore", "StressType - n"), data=tableStudentData, strata="year")
+
+table <- print(table)
+#remove the last two columns as they are not important
+table <- table[,-c(5,6)]
+```
+```{r tableOne2, echo=FALSE}
+#print table nicely
+table %>% kbl()  %>% kable_classic(latex_options = "HOLD_position", full_width = F) %>% add_header_above(c(" ", "Year" = 4)) %>% add_indent(c(3:5, 7:10, 13:17, 20:24, 27:31), level_of_indent = 1)  #%>% save_kable(file = "DASSummaryTableZ3.png", zoom = 3)
+```
+
+
+```{r DASPlot,fig.align='center'}
+#change the shape of the data set to be able to create the bar plot below by counting the different amounts of classifications for depression anxiety and stress
+dasdf <- StudentData %>% pivot_longer(cols = c(DepressionType, AnxietyType, StressType), names_to = "Type", values_to = "count")
+dasdf <-data.frame(table(dasdf$count, dasdf$Type, dasdf$year))
+
+#barplot of classification of illnesses over 4 years
+ggplot(dasdf, aes(x = Var3, y = Freq, fill = Var1)) +
+  geom_col(colour = "black", position = "fill") +
+    scale_y_continuous(labels = scales::percent) + # make sure to use proportions 
+      labs(x="Year", y="Proportion of classification of illness (%)") +
+            facet_wrap(~ Var2) + #add some colours 
+  scale_fill_manual(values=c('azure2', 'springgreen1', 'greenyellow', 'chocolate1', 'firebrick3'), name = "Classificaition of Illness") 
+
+```
+
+
+What we can see from the three plots is that there is a slight decrease in 'normal' cases of depression, anxiety and stress, meaning cases which are not normal have increased. We can also see that 2017 and 2020 had less normal cases compared to 2018 and 2019. This may be due to the fact there are less values in 2018 and 2019. 
+
+The increase in significant cases of stress from 2019 to 2020 is less compared to depression and anxiety. 
+
+
+
+```{r tableOneDAS1, include = FALSE}
+#creating summary table 
+tableStudentData <- StudentData
+tableStudentData <- tableStudentData %>% 
+  rename( # rename the rows to make the table clearer
+    "DepressionType - n"  = DepressionType,
+    "AnxietyType - n"  = AnxietyType,
+    "StressType - n"  = StressType,
+    )
+#create the table stratifying by year
+table1<-CreateTableOne(vars = c("DepressionType - n",  "AnxietyType - n",  "StressType - n"), data=tableStudentData, strata="year")
+
+table1 <- print(table1)
+#omit last two columns which are not needed
+table1 <- table1[,-c(5,6)]
+```
+```{r tableOneDAS2, echo=FALSE}
+#print table nicely
+table1 %>% kbl() %>% kable_classic(latex_options = "HOLD_position", full_width = F) %>% add_header_above(c(" ", "year" = 4)) %>% add_indent(c(3:7, 9:13, 15:19), level_of_indent = 1) # %>% save_kable(file = "DASClassificationSummaryTable.png", zoom = 1)
+```
+
+The table also confirm that there has been a reduction in normal cases of depression and anxiety from 2017 to 2020 (meaning an increase in more severe cases) but this is not the case with stress; severe and extremely severe (S&ES) cases of depression increase from 6.8% in 2017 to 15% in 2020. Similarly for anxiety, S&ES cases increased from 14.9% to 19.8% from 2017 to 2020. However E&ES cases of stress did not increase. Going from 13.6% to 12.6%, while having a dip to around 10% between 2018 and 2019. 
+
+ 
+
+## Adding sex
+
+Now I will look at the differences between sexes and the interpretation of scores. It is important to keep into consideration the fact there are many more female values than male values in the dataset. One possible reason for this is the stigma around men discussing their feelings and emotions. This means men are less likely to complete this survey as it has connotations with being weak. The large difference in the number of male and female responses, and the few number of male responses in general make it more difficult to come up with clear interpretations. 
+
+I have made sure to remove the 91 N/A values and the one 'other' values when using sex (which count for 12% of the data points) . It is important to note that all but two of the na values are from 2017. 
+
+
+```{r GenderYearFreqTable}
+#Frequency table of gender and year
+kable(table(StudentData$sex, StudentData$year),caption = "Frequency table of gender and year")%>% kable_classic(latex_options = "HOLD_position")
+```
+
+
+```{r DASwithSex, fig.align='center', fig.width=8}
+#removing 91 NA values and 1 'other' value
+newStudentData <- StudentData
+newStudentData <- droplevels(newStudentData[!newStudentData$sex == 'Other',])
+newStudentData <- droplevels(newStudentData[!newStudentData$sex == 'N/A',])
+#reshape the data set
+dasdf <- newStudentData %>% pivot_longer(cols = c(DepressionType, AnxietyType, StressType), names_to = "Type", values_to = "count")
+dasdf <-data.frame(table(dasdf$count, dasdf$Type, dasdf$year, dasdf$sex))
+
+ggplot(dasdf, aes(x = Var3, y = Freq, fill = Var1)) +
+  geom_col(colour = "black", position = "fill") +
+    scale_y_continuous(labels = scales::percent) +
+      labs(x="Year", y="Proportion of classification of illness (%)", title = "") +
+            facet_grid(Var2 ~ Var4) + # make sure to facet by sex and illness
+  scale_fill_manual(values=c('azure2', 'springgreen1', 'greenyellow', 'chocolate1', 'firebrick3'), , name = "Classificaition of Illness")
+```
+
+**Depression:**
+We can see that there is more variation from the years 2017-2019 for females compared to males. However for 2020, the distribution of depression is alike. It is difficult to look at the male group for the years 2017-2019 as there are so very few data points. 
+
+**Anxiety:**
+Above it is important to note that there was only one value for male 2018 which was classified as normal. 
+For females we can see a increase in normal cases from 2017 to 2019 but then a large decrease showing more serious classifications of anxiety. We can see that males had more extremely severe cases of anxiety in 2020, but less severe cases compared to women.
+
+**Stress:**
+The plot above shows us that the year 2017 had the most amount of serious cases for males and females.
+
+
+## Adding age
+
+The reason to consider age is the fact that different aged university student would have different effects from the pandemic; if we assume that first years were aged 19 and under, and non-first years as ages 20 and above, we can decide if this has an effect students mental health. First years would have to have dealt with moving out and living alone for the first time for most people. Where as older students would have to have dealt with education disruption and online examinations.
+
+I will factor the ages into groups, and group together the smaller extreme ages to reduce the number of factors. 
+
+There is one row where the age was given as 0. I have removed this for the figures and table below.
+
+```{r DASwithAge, fig.align='center', fig.width=8}
+#removing one value with age as 0
+StudentData <- StudentData[-475,]
+newStudentData <- StudentData
+#reshape the data set
+dasdf <- newStudentData %>% pivot_longer(cols = c(DepressionType, AnxietyType, StressType), names_to = "Type", values_to = "count")
+dasdf <-data.frame(table(dasdf$count, dasdf$Type, dasdf$year, dasdf$age))
+
+ggplot(dasdf, aes(x = Var3, y = Freq, fill = Var1)) +
+  geom_col(colour = "black", position = "fill") +
+    scale_y_continuous(labels = scales::percent) +
+      labs(x="Year", y="Proportion of classification of illness (%)", title = "") +
+            facet_grid(Var2 ~ Var4) +
+  scale_fill_manual(values=c('azure2', 'springgreen1', 'greenyellow', 'chocolate1', 'firebrick3'), , name = "Classificaition of Illness")
+
+```
+
+
+We can see that in 2020 there was a reduction in normal illnesses compared to previous years particularly with anxiety and depression. This can be seen for all ages but there is not a particular age group which has been significantly more affected than another. 
+
+
+## Modelling
+
+I will start with a linear model to see whether age and sex affect the scores received on the questionnaire. For this I will use the sum of respondents Depression, Anxiety and Stress score. 
+
+I have used the following linear model:
+$$Y_{i} = \beta_{0}+\beta_{1}year_{i}+\beta_{2}sex_{i}+\beta_{3}age_{i}+\varepsilon_{i} $$
+
+```{r fig.height=5, fig.width=7}
+#cleaning the data leaving 667 values.
+newStudentData <- StudentData
+#remove the missing sex values and one other value
+newStudentData <- droplevels(newStudentData[!newStudentData$sex == 'Other',])
+newStudentData <- droplevels(newStudentData[!newStudentData$sex == 'N/A',])
+
+newStudentData <- mutate(newStudentData, TotalScore=rowSums(dplyr::select(newStudentData, DepressionScore, AnxietyScore, StressScore)))
+#set year as factor variable
+newStudentData$year <- as.factor(newStudentData$year) 
+#set the year 2020 as the reference level
+newStudentData$year <- relevel(newStudentData$year, ref=4)
+
+#create the linear model
+lm1 <- lm(TotalScore ~ year + sex + age, data=newStudentData)
+#plot the diagnostic plots
+par(mfrow=c(2,2))
+plot(lm1,1)
+plot(lm1,2)
+plot(lm1,3)
+plot(lm1,4)
+par(mfrow=c(1,1))
+#summary of linear model
+summary(lm1)
+```
+
+
+
+Looking at the plots above we can see that the residuals follow the straight line, hence we can assume homoscedasticity holds. The QQ plot shows us the the data is skewed compared to the normal distribution. The residuals vs leverage plot shows us that majority of the data points have very low leverage and would affect are coefficients much if they were removed. There are a few points with high residuals , but no points are close to the Cooks Distance. 
+
+One issue is the fact that we do not know if our data set includes the same individuals across the years 2017-2020. If this was the case, then our assumption of independence would be violated as previous years scores could affect future years for the same people. 
+
+Looking at the coefficients table we can see that there is evidence that individuals' scores would be lower in 2018 and 2019 compared to 2020, however there is insufficient evidence to suggest that scores were different in 2020 compared to 2017. 
+
+Looking at age we can see at a 5% significance level that there is significant evidence that ages 19 and 20 had higher scores on the questionnaire compared to individuals aged 18 and under. But there is not significant evidence to suggest that ages 21 and over had higher scores compared to individuals aged 18 and under.  
+
+```{r}
+#summary of coefficients from linear model
+table <- data.frame(coef(lm1), confint(lm1))
+
+table %>% round(3) %>% kable(col.names = c("Coefficient Estimate", "CI 2.5%", "CI 97.5%"))%>%  kable_classic(latex_options = "HOLD_position", full_width = F) #%>% save_kable(file = "DASCoefficientsTable.png", zoom = 1.5)
+```
+
+FOR THE APPENDIX:
+
+```{r fig.height=8}
+#table for full DASS-21
+
+dass <- matrix(c("I found it hard to wind down", "I was aware of dryness of my mouth", "I couldn’t seem to experience any positive feeling at all", "I experienced breathing difficulty (e.g. excessively rapid breathing, breathlessness in the absence of physical exertion)", "I found it difficult to work up the initiative to do things", "I tended to over-react to situations", " I experienced trembling (e.g. in the hands)", "I felt that I was using a lot of nervous energy", "I was worried about situations in which I might panic and make a fool of myself", "I felt that I had nothing to look forward to ", "I found myself getting agitated ", "I found it difficult to relax ", "I felt down-hearted and blue ", "I was intolerant of anything that kept me from getting on with what I was doing", "I felt I was close to panic", " I was unable to become enthusiastic about anything", "I felt I wasn’t worth much as a person ", " I felt that I was rather touchy ", "I was aware of the action of my heart in the absence of physical exertion (e.g. sense of heart rate increase, heart missing a beat)", "I felt scared without any good reason ", "I felt that life was meaningless", "Stress" , "Anxiety", "Depression", "Anxiety", "Depression", "Stress", "Anxiety", "Stress", "Anxiety", "Depression", "Stress", "Stress", "Depression", "Stress", "Anxiety", "Depression", "Depression", "Stress", "Anxiety", "Anxiety", "Depression"), nrow = 21, dimnames = list(c("Question.1", "Question.2","Question.3","Question.4","Question.5","Question.6","Question.7","Question.8","Question.9","Question.10","Question.11","Question.12","Question.13","Question.14","Question.15","Question.16","Question.17","Question.18","Question.19","Question.20","Question.21"), c( "Symptom", "Illness")))
+
+kable(dass, booktabs = TRUE)%>% kable_classic(latex_options = "HOLD_position", full_width = F, "striped") %>% column_spec(1,width = "1.3in") %>% row_spec(1:nrow(dass),
+           extra_css = "padding: 10px") #%>% save_kable(file = "DASS21.png", zoom = 1)
+```
+
+
+## References

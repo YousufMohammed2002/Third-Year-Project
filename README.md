@@ -57,6 +57,7 @@ globe, due to lockdowns and isolation. People have had to adapt to new lifestyle
 just physically but psychologically as well. This report intends to understand whether the COVID-19 pandemic
 negatively impacted UK university students’ mental health and which groups of people were affected to a lesser
 or greater extent regarding their mental well-being during the COVID-19 pandemic.
+
 Methods: Data sets were cleaned and visualised in R and RStudio. Modelling was done using linear regression
 models using p-value hypothesis testing at a 5% significance level. For one data set a Bayesian network was
 created and tested.
